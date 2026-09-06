@@ -1,0 +1,10 @@
+# Copie para terraform.tfvars e preencha. NÃO comite o arquivo preenchido.
+
+aws_region  = "us-east-1"
+environment = "homolog"
+
+# Connection string do Neon — driver psycopg (sem +asyncpg).
+database_url = "postgresql://user:senha@ep-xxx.neon.tech/autogiro?sslmode=require"
+
+# Mesmo valor configurado no repositório autogiro-app.
+jwt_secret = "gere-com-python-c-import-secrets-print-secrets-token_urlsafe-48"

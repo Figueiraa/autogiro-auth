@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Ambiente virtual
+.venv/
+venv/
+env/
+
+# Variáveis de ambiente
+.env
+
+# Pytest / cobertura
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+report/
+
+# Ruff
+.ruff_cache/
+
+# Build da Lambda
+build/
+dist/
+*.zip
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+terraform.tfvars

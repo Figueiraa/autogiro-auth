@@ -1,0 +1,142 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
+concurrency:
+  group: ci-cd-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  AWS_REGION: us-east-1
+  TF_IN_AUTOMATION: "true"
+
+jobs:
+  # ─── CI: lint, segurança e testes ──────────────────────────────────────────
+  ci:
+    name: Lint & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Lint (ruff)
+        run: ruff check src tests
+
+      - name: Security scan (bandit)
+        run: bandit -r src -f screen -ll
+
+      - name: Tests (pytest + coverage gate 90%)
+        run: pytest
+
+      - name: Publish test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-and-coverage-reports
+          path: |
+            report/junit.xml
+            coverage.xml
+          retention-days: 30
+
+  # ─── Validação do Terraform (roda em PR e em push) ─────────────────────────
+  terraform-validate:
+    name: Terraform Validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.10.3"
+
+      - name: Format check
+        run: terraform -chdir=terraform fmt -check -recursive
+
+      - name: Init (sem backend)
+        run: terraform -chdir=terraform init -backend=false
+
+      - name: Validate
+        run: terraform -chdir=terraform validate
+
+  # ─── Build do pacote da Lambda ─────────────────────────────────────────────
+  build:
+    name: Build package
+    needs: [ci, terraform-validate]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build Lambda package
+        run: bash scripts/build.sh
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: lambda-build
+          path: build/
+          retention-days: 7
+
+  # ─── CD: publica a função na AWS ───────────────────────────────────────────
+  # develop -> homolog | main -> prod
+  deploy:
+    name: Deploy to AWS
+    needs: build
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref_name == 'main' && 'prod' || 'homolog' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: lambda-build
+          path: build/
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.10.3"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Terraform Init
+        run: terraform -chdir=terraform init
+
+      - name: Terraform Apply
+        env:
+          TF_VAR_environment: ${{ github.ref_name == 'main' && 'prod' || 'homolog' }}
+          TF_VAR_database_url: ${{ secrets.DATABASE_URL }}
+          TF_VAR_jwt_secret: ${{ secrets.JWT_SECRET }}
+        run: terraform -chdir=terraform apply -auto-approve
+
+      - name: Publish endpoint
+        run: |
+          ENDPOINT=$(terraform -chdir=terraform output -raw auth_endpoint)
+          echo "### Endpoint de autenticação" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "$ENDPOINT" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
