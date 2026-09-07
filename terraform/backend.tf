@@ -1,23 +1,25 @@
-# Backend do Terraform state.
+# Backend do Terraform state — HCP Terraform (Terraform Cloud).
 #
-# O state precisa sobreviver entre execuções da pipeline; sem isso, cada `apply`
-# tentaria recriar recursos que já existem. Duas opções gratuitas:
+# O state precisa sobreviver entre execuções da pipeline: o runner do GitHub começa
+# com disco limpo a cada job, então um state local seria descartado e o `apply`
+# seguinte tentaria recriar recursos que já existem (aqui, falharia com
+# `EntityAlreadyExists` no IAM role).
 #
-#   1. HCP Terraform (Terraform Cloud) — 500 recursos no plano gratuito.
-#      Descomente o bloco `cloud` abaixo e rode `terraform login` uma vez.
+# Plano gratuito do HCP: 500 recursos, sem cartão de crédito.
 #
-#   2. S3 — cabe no free tier (o state tem poucos KB), mas exige criar o bucket
-#      antes. Neste projeto preferimos o HCP para não depender de bootstrap.
+# `tags` em vez de `name`: o workspace é escolhido em tempo de execução pela
+# pipeline (`TF_WORKSPACE=autogiro-auth-homolog` ou `-prod`), de modo que os dois
+# ambientes tenham states independentes. Rodando localmente, use
+# `terraform workspace select`.
 #
-# Enquanto nenhum backend estiver configurado, o state fica local — suficiente
-# para desenvolvimento, mas o job de deploy da pipeline precisa de um remoto.
+# Autenticação: `TF_TOKEN_app_terraform_io` no ambiente (a pipeline injeta a partir
+# do secret `TF_API_TOKEN`) ou `terraform login` na máquina.
+terraform {
+  cloud {
+    organization = "autogiro"
 
-# terraform {
-#   cloud {
-#     organization = "autogiro"
-#
-#     workspaces {
-#       name = "autogiro-auth"
-#     }
-#   }
-# }
+    workspaces {
+      tags = ["autogiro-auth"]
+    }
+  }
+}
