@@ -89,3 +89,18 @@ resource "aws_lambda_function_url" "auth" {
     max_age       = 3600
   }
 }
+
+# `authorization_type = "NONE"` sozinho não basta: a AWS ainda exige uma
+# resource-based policy autorizando explicitamente a invocação. Sem ela a
+# Function URL responde 403 Forbidden antes de a Lambda ser executada.
+#
+# O acesso é público por desenho — é o endpoint de autenticação, chamado por
+# clientes não autenticados. A proteção contra abuso é a validação do CPF e,
+# como registrado na RFC-003, rate limiting é a mitigação recomendada.
+resource "aws_lambda_permission" "function_url_public" {
+  statement_id           = "AllowPublicFunctionUrlInvoke"
+  action                 = "lambda:InvokeFunctionUrl"
+  function_name          = aws_lambda_function.auth.function_name
+  principal              = "*"
+  function_url_auth_type = "NONE"
+}
