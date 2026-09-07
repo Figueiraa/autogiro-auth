@@ -18,6 +18,9 @@ concurrency:
 env:
   AWS_REGION: us-east-1
   TF_IN_AUTOMATION: "true"
+  # Nunca perguntar nada no terminal: com o backend `cloud` declarado, um prompt
+  # de credencial travaria o job em vez de falhar.
+  TF_INPUT: "0"
 
 jobs:
   # ─── CI: lint, segurança e testes ──────────────────────────────────────────
@@ -123,17 +126,27 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
+      # O state vive no HCP Terraform. TF_WORKSPACE dá a homolog e prod states
+      # independentes dentro da mesma organização.
       - name: Terraform Init
+        env:
+          TF_TOKEN_app_terraform_io: ${{ secrets.TF_API_TOKEN }}
+          TF_WORKSPACE: autogiro-auth-${{ github.ref_name == 'main' && 'prod' || 'homolog' }}
         run: terraform -chdir=terraform init
 
       - name: Terraform Apply
         env:
+          TF_TOKEN_app_terraform_io: ${{ secrets.TF_API_TOKEN }}
+          TF_WORKSPACE: autogiro-auth-${{ github.ref_name == 'main' && 'prod' || 'homolog' }}
           TF_VAR_environment: ${{ github.ref_name == 'main' && 'prod' || 'homolog' }}
           TF_VAR_database_url: ${{ secrets.DATABASE_URL }}
           TF_VAR_jwt_secret: ${{ secrets.JWT_SECRET }}
         run: terraform -chdir=terraform apply -auto-approve
 
       - name: Publish endpoint
+        env:
+          TF_TOKEN_app_terraform_io: ${{ secrets.TF_API_TOKEN }}
+          TF_WORKSPACE: autogiro-auth-${{ github.ref_name == 'main' && 'prod' || 'homolog' }}
         run: |
           ENDPOINT=$(terraform -chdir=terraform output -raw auth_endpoint)
           echo "### Endpoint de autenticação" >> "$GITHUB_STEP_SUMMARY"
