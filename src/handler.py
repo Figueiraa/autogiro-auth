@@ -67,8 +67,14 @@ def _parse_body(event: dict[str, Any]) -> dict[str, Any]:
 
 
 def _find_client(document: str) -> dict[str, Any] | None:
-    """Busca o cliente pelo CPF normalizado (o banco armazena só os dígitos)."""
-    query = "SELECT id, name, cpf_cnpj FROM clients WHERE cpf_cnpj = %s LIMIT 1"
+    """Busca o cliente pelo CPF normalizado (o banco armazena só os dígitos).
+
+    Traz `is_active` na mesma consulta: o handler precisa distinguir cliente
+    inexistente de cliente bloqueado, e são respostas diferentes.
+    """
+    query = (
+        "SELECT id, name, cpf_cnpj, is_active FROM clients WHERE cpf_cnpj = %s LIMIT 1"
+    )
 
     with _get_connection().cursor() as cursor:
         cursor.execute(query, (document,))
@@ -77,7 +83,7 @@ def _find_client(document: str) -> dict[str, Any] | None:
     if row is None:
         return None
 
-    return {"id": row[0], "name": row[1], "cpf_cnpj": row[2]}
+    return {"id": row[0], "name": row[1], "cpf_cnpj": row[2], "is_active": row[3]}
 
 
 def _issue_token(client: dict[str, Any]) -> tuple[str, int]:
@@ -126,6 +132,14 @@ def handler(event: dict[str, Any], _context: Any = None) -> dict[str, Any]:
     if client is None:
         logger.info("Tentativa de autenticação com CPF não cadastrado")
         return _response(401, {"detail": "CPF inválido ou não cadastrado"})
+
+    if not client["is_active"]:
+        # Resposta distinta do 401 de propósito: aqui o cliente existe e o
+        # documento é válido, então não há risco de enumeração — o que falta é
+        # autorização, não autenticação. Um cliente bloqueado precisa saber que
+        # o problema é o cadastro, para procurar a oficina.
+        logger.info("Cliente %s está inativo; token não emitido", client["id"])
+        return _response(403, {"detail": "Cadastro inativo. Procure a oficina."})
 
     token, expires_in = _issue_token(client)
 
