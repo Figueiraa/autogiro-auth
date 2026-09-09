@@ -23,7 +23,11 @@ def _env(monkeypatch):
 
 
 def _mock_connection(monkeypatch, row):
-    """Injeta uma conexão falsa que devolve `row` na consulta do cliente."""
+    """Injeta uma conexão falsa que devolve `row` na consulta do cliente.
+
+    A linha tem a forma `(id, name, cpf_cnpj, is_active)` — a mesma ordem do
+    SELECT em `_find_client`.
+    """
     cursor = MagicMock()
     cursor.fetchone.return_value = row
     cursor.__enter__ = MagicMock(return_value=cursor)
@@ -59,7 +63,7 @@ class TestValidacaoDeEntrada:
         assert response["statusCode"] == 400
 
     def test_body_como_dict(self, monkeypatch):
-        _mock_connection(monkeypatch, (1, "Maria", CPF_VALIDO))
+        _mock_connection(monkeypatch, (1, "Maria", CPF_VALIDO, True))
 
         response = handler_module.handler({"body": {"cpf": CPF_VALIDO}})
 
@@ -83,7 +87,7 @@ class TestAutenticacao:
         assert _body(response)["detail"] == "CPF inválido ou não cadastrado"
 
     def test_cliente_encontrado_recebe_token(self, monkeypatch):
-        _mock_connection(monkeypatch, (42, "Maria Silva", CPF_VALIDO))
+        _mock_connection(monkeypatch, (42, "Maria Silva", CPF_VALIDO, True))
 
         response = handler_module.handler({"body": json.dumps({"cpf": CPF_VALIDO})})
         body = _body(response)
@@ -94,7 +98,7 @@ class TestAutenticacao:
         assert body["access_token"]
 
     def test_token_carrega_o_cpf_no_subject(self, monkeypatch):
-        _mock_connection(monkeypatch, (42, "Maria Silva", CPF_VALIDO))
+        _mock_connection(monkeypatch, (42, "Maria Silva", CPF_VALIDO, True))
 
         response = handler_module.handler({"body": json.dumps({"cpf": CPF_VALIDO})})
         payload = jwt.decode(_body(response)["access_token"], JWT_SECRET, algorithms=["HS256"])
@@ -105,7 +109,7 @@ class TestAutenticacao:
         assert payload["iss"] == "autogiro-auth"
 
     def test_cpf_com_mascara_e_normalizado_na_consulta(self, monkeypatch):
-        connection = _mock_connection(monkeypatch, (1, "Maria", CPF_VALIDO))
+        connection = _mock_connection(monkeypatch, (1, "Maria", CPF_VALIDO, True))
 
         response = handler_module.handler({"body": json.dumps({"cpf": "529.982.247-25"})})
 
@@ -156,3 +160,56 @@ class TestConexao:
         monkeypatch.setattr(psycopg, "connect", lambda url, **kwargs: nova)
 
         assert handler_module._get_connection() is nova
+
+
+class TestStatusDoCliente:
+    """O enunciado pede consultar a existência **e o status** do cliente.
+
+    Cliente inativo existe na base e tem CPF válido, mas não pode obter token.
+    """
+
+    def test_cliente_inativo_recebe_403(self, monkeypatch):
+        _mock_connection(monkeypatch, (7, "Transportes Lima ME", CPF_VALIDO, False))
+
+        resposta = handler_module.handler({"body": f'{{"cpf": "{CPF_VALIDO}"}}'})
+
+        assert resposta["statusCode"] == 403
+
+    def test_a_mensagem_orienta_o_cliente_bloqueado(self, monkeypatch):
+        """Ao contrário do 401, aqui revelar o motivo é seguro e útil.
+
+        O documento é válido e o cadastro existe, então não há o que enumerar —
+        e o cliente precisa saber que deve procurar a oficina.
+        """
+        _mock_connection(monkeypatch, (7, "Transportes Lima ME", CPF_VALIDO, False))
+
+        resposta = handler_module.handler({"body": f'{{"cpf": "{CPF_VALIDO}"}}'})
+
+        assert "inativo" in _body(resposta)["detail"].lower()
+
+    def test_cliente_inativo_nao_recebe_token(self, monkeypatch):
+        _mock_connection(monkeypatch, (7, "Bloqueado", CPF_VALIDO, False))
+
+        resposta = handler_module.handler({"body": f'{{"cpf": "{CPF_VALIDO}"}}'})
+
+        assert "access_token" not in _body(resposta)
+
+    def test_cliente_ativo_segue_recebendo_token(self, monkeypatch):
+        """Guarda contra regressão: o caminho normal não pode ter mudado."""
+        _mock_connection(monkeypatch, (1, "Maria", CPF_VALIDO, True))
+
+        resposta = handler_module.handler({"body": f'{{"cpf": "{CPF_VALIDO}"}}'})
+
+        assert resposta["statusCode"] == 200
+        assert _body(resposta)["access_token"]
+
+    def test_inativo_e_distinguido_de_inexistente(self, monkeypatch):
+        """403 para bloqueado, 401 para inexistente — são situações diferentes."""
+        _mock_connection(monkeypatch, None)
+        inexistente = handler_module.handler({"body": f'{{"cpf": "{CPF_VALIDO}"}}'})
+
+        _mock_connection(monkeypatch, (7, "Bloqueado", CPF_VALIDO, False))
+        bloqueado = handler_module.handler({"body": f'{{"cpf": "{CPF_VALIDO}"}}'})
+
+        assert inexistente["statusCode"] == 401
+        assert bloqueado["statusCode"] == 403
