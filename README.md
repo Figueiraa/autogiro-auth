@@ -172,7 +172,7 @@ python -m venv venv && source venv/Scripts/activate
 pip install -r requirements-dev.txt
 cp .env.example .env
 
-pytest                    # 35 testes, gate de cobertura de 90%
+pytest                    # 40 testes, 100% de cobertura (gate mínimo: 90%)
 ruff check src tests
 bandit -r src -ll
 ```
