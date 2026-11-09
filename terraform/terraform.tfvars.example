@@ -3,8 +3,10 @@
 aws_region  = "us-east-1"
 environment = "homolog"
 
-# Connection string do Neon — driver psycopg (sem +asyncpg).
-database_url = "postgresql://user:senha@ep-xxx.neon.tech/autogiro?sslmode=require"
+# Banco do OS Service, usuário somente leitura `auth_reader` (saída
+# `auth_database_url` do terraform/ do autogiro-os-service). O search_path vai na
+# URL, para a consulta `FROM clients` ler a view auth.clients.
+database_url = "postgresql://auth_reader:senha@ep-xxx.us-east-2.aws.neon.tech/autogiro_os?sslmode=require&options=-csearch_path%3Dauth"
 
-# Mesmo valor configurado no repositório autogiro-app.
+# Mesmo segredo configurado no Kong (autogiro-infra-k8s) e nos microsserviços.
 jwt_secret = "gere-com-python-c-import-secrets-print-secrets-token_urlsafe-48"
