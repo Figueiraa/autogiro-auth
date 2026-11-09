@@ -22,13 +22,13 @@ variable "function_name" {
 }
 
 variable "database_url" {
-  description = "Connection string do Neon (driver psycopg, sem +asyncpg)."
+  description = "Connection string do banco do OS Service (psycopg, usuário auth_reader, com search_path=auth)."
   type        = string
   sensitive   = true
 }
 
 variable "jwt_secret" {
-  description = "Segredo HS256 compartilhado com a aplicação principal (autogiro-app)."
+  description = "Segredo HS256 compartilhado com o Kong e os microsserviços."
   type        = string
   sensitive   = true
 }

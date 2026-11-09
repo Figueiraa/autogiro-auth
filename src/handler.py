@@ -1,13 +1,14 @@
 """Function Serverless de autenticação por CPF do AutoGiro.
 
-Fluxo (requisito R3 do Tech Challenge Fase 3):
+Fluxo:
   1. Valida o CPF recebido (formato e dígitos verificadores).
-  2. Consulta a existência e o status do cliente no banco gerenciado (Neon).
+  2. Consulta a existência e o status do cliente na view `auth.clients` do banco
+     do OS Service (Neon), com um usuário somente leitura.
   3. Gera e devolve um token JWT válido para consumo das APIs protegidas.
 
-O token é assinado em HS256 com o mesmo segredo configurado na aplicação
-principal (autogiro-app). O Kong Gateway valida a assinatura antes de rotear;
-a API resolve o cliente pelo `sub` do token, que carrega o CPF normalizado.
+O token é assinado em HS256 com o mesmo segredo configurado no Kong e nos
+microsserviços. O Kong valida a assinatura antes de rotear; cada serviço
+revalida e resolve o cliente pelo `sub` do token, que carrega o CPF normalizado.
 """
 
 import json
