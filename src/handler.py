@@ -11,6 +11,7 @@ microsserviços. O Kong valida a assinatura antes de rotear; cada serviço
 revalida e resolve o cliente pelo `sub` do token, que carrega o CPF normalizado.
 """
 
+import contextlib
 import json
 import logging
 import os
@@ -39,9 +40,22 @@ def _get_connection() -> psycopg.Connection:
 
     if _connection is None or _connection.closed:
         database_url = os.environ["DATABASE_URL"]
-        _connection = psycopg.connect(database_url, connect_timeout=5)
+        # autocommit: a Lambda só lê. Sem ele, cada consulta abre uma transação que
+        # fica aberta entre invocações, e um erro deixaria a conexão em estado de
+        # falha para todas as chamadas seguintes do mesmo ambiente.
+        _connection = psycopg.connect(database_url, connect_timeout=5, autocommit=True)
 
     return _connection
+
+
+def _discard_connection() -> None:
+    """Descarta a conexão depois de um erro: a próxima invocação abre uma nova."""
+    global _connection
+
+    if _connection is not None:
+        with contextlib.suppress(psycopg.Error):
+            _connection.close()
+    _connection = None
 
 
 def _response(status: int, body: dict[str, Any]) -> dict[str, Any]:
@@ -62,9 +76,11 @@ def _parse_body(event: dict[str, Any]) -> dict[str, Any]:
         return raw
 
     try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
+        body = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
         return {}
+    # Um JSON válido que não é objeto (lista, número, texto) também é corpo inválido.
+    return body if isinstance(body, dict) else {}
 
 
 def _find_client(document: str) -> dict[str, Any] | None:
@@ -115,6 +131,8 @@ def handler(event: dict[str, Any], _context: Any = None) -> dict[str, Any]:
 
     if not document:
         return _response(400, {"detail": "O campo 'cpf' é obrigatório"})
+    if not isinstance(document, str):
+        return _response(400, {"detail": "O campo 'cpf' deve ser texto"})
 
     if not cpf_utils.is_valid(document):
         # Não distingue "formato inválido" de "não cadastrado" na mensagem,
@@ -128,6 +146,7 @@ def handler(event: dict[str, Any], _context: Any = None) -> dict[str, Any]:
         client = _find_client(normalized)
     except psycopg.Error:
         logger.exception("Falha ao consultar o banco de dados")
+        _discard_connection()
         return _response(503, {"detail": "Serviço temporariamente indisponível"})
 
     if client is None:
