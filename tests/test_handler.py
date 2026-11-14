@@ -213,3 +213,48 @@ class TestStatusDoCliente:
 
         assert inexistente["statusCode"] == 401
         assert bloqueado["statusCode"] == 403
+
+
+class TestEntradaMalformada:
+    @pytest.mark.parametrize("corpo", ["[1, 2, 3]", "42", '"texto"'])
+    def test_json_que_nao_e_objeto_devolve_400(self, corpo):
+        resposta = handler_module.handler({"body": corpo})
+        assert resposta["statusCode"] == 400
+
+    def test_cpf_que_nao_e_texto_devolve_400(self):
+        resposta = handler_module.handler({"body": json.dumps({"cpf": 44232322191})})
+        assert resposta["statusCode"] == 400
+        assert "texto" in json.loads(resposta["body"])["detail"]
+
+
+class TestConexaoDepoisDeErro:
+    def test_abre_a_conexao_em_autocommit(self, monkeypatch):
+        chamadas = []
+
+        def _connect(url, **kwargs):
+            chamadas.append(kwargs)
+            return MagicMock(closed=False)
+
+        monkeypatch.setattr(psycopg, "connect", _connect)
+        handler_module._get_connection()
+        assert chamadas[0]["autocommit"] is True
+
+    def test_erro_de_banco_descarta_a_conexao(self, monkeypatch):
+        conexao = MagicMock(closed=False)
+        conexao.cursor.side_effect = psycopg.OperationalError("conexão perdida")
+        monkeypatch.setattr(handler_module, "_connection", conexao)
+
+        resposta = handler_module.handler({"body": json.dumps({"cpf": CPF_VALIDO})})
+
+        assert resposta["statusCode"] == 503
+        conexao.close.assert_called_once()
+        assert handler_module._connection is None
+
+    def test_descartar_ignora_erro_ao_fechar(self, monkeypatch):
+        conexao = MagicMock(closed=False)
+        conexao.close.side_effect = psycopg.OperationalError("já caiu")
+        monkeypatch.setattr(handler_module, "_connection", conexao)
+
+        handler_module._discard_connection()
+
+        assert handler_module._connection is None

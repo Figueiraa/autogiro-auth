@@ -13,7 +13,9 @@ permissions:
 
 concurrency:
   group: ci-cd-${{ github.ref }}
-  cancel-in-progress: true
+  # Em PR, um push novo cancela a execução anterior. Fora de PR, não: cortar um
+  # `terraform apply` no meio deixa a Lambda num estado intermediário.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   AWS_REGION: us-east-1
